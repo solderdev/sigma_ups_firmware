@@ -49,8 +49,8 @@ void setup(void)
    * @n          Four batteries: 14800 ~ 16800 mV
    * @return None
    */
-   // maxChargeVoltage = 15600;
-   // LPUPS.setMaxChargeVoltage(maxChargeVoltage);
+   maxChargeVoltage = 15600;
+   LPUPS.setMaxChargeVoltage(maxChargeVoltage);
 
    // Initialize HIDPowerDevice
   initPowerDevice();
