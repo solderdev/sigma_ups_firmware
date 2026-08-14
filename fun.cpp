@@ -59,13 +59,13 @@ void initPowerDevice(void)
 {
   PowerDevice.begin();
 
-  // 序列号是以特殊方式设置的，因为它形成了Arduino端口名称
+  // The serial number is set in a special way because it forms the Arduino port name
   PowerDevice.setSerial(STRING_SERIAL);
 
-  // 用于调试目的。
+  // For debugging purposes.
   PowerDevice.setOutput(Serial);
 
-  // usb上报参数设置
+  // USB reporting parameter setup
   PowerDevice.setFeature(HID_PD_PRESENTSTATUS, &iPresentStatus, sizeof(iPresentStatus));
 
   PowerDevice.setFeature(HID_PD_RUNTIMETOEMPTY, &iRunTimeToEmpty, sizeof(iRunTimeToEmpty));

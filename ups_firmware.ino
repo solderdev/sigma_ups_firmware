@@ -124,7 +124,7 @@ void loop()
   delayWithLeds(1000);
   iIntTimer++;
 
-  /************ 批量发送或中断 ***********************/
+  /************ Batch send or send on change ***********************/
   if ((iPresentStatus != iPreviousStatus) || (iRemaining != iPrevRemaining) ||
     (iRunTimeToEmpty != iPrevRunTimeToEmpty) || (iIntTimer > MIN_UPDATE_INTERVAL)) {
 
