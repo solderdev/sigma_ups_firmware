@@ -75,7 +75,9 @@ void loop()
   printChargeData();
 
   // Report measured pack voltage in centivolts (HID descriptor unit).
-  // Keep the last good value if the VBAT ADC reads 0 (e.g. failed I2C read).
+  // Keep the last good value if the VBAT ADC reads 0 (dead ADC, or an I2C
+  // failure on the very first loop while regBuf is still zeroed; later I2C
+  // failures leave regBuf stale rather than zero).
   if (batteryVoltage) {
     iVoltage = batteryVoltage / 10;
   }
