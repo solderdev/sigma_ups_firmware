@@ -22,9 +22,20 @@ uint16_t iPrevRunTimeToEmpty = 0;
 
 int iIntTimer = 0; // Update interval counter
 
+bool bCommsLost = false;   // Last HID report to the host failed
+
 
 void setup(void)
 {
+  // Initialize UPS indicator LEDs first, so they stay dark through the boot delay.
+  // Writing HIGH before pinMode keeps the active-low LEDs off with no on-glitch.
+  digitalWrite(UPS_GREEN_LED, HIGH);
+  digitalWrite(UPS_RED_LED, HIGH);
+  digitalWrite(UPS_BLUE_LED, HIGH);
+  pinMode(UPS_GREEN_LED, OUTPUT);
+  pinMode(UPS_RED_LED, OUTPUT);
+  pinMode(UPS_BLUE_LED, OUTPUT);
+
   delay(5000);
   Serial.begin(115200);
   Serial.println("Serial Begin"); //Avoid serial port not working
@@ -35,11 +46,6 @@ void setup(void)
     delay(3000);
   }
   Serial.println("Begin ok!");
-
-  // Initialize UPS indicator LEDs
-  pinMode(UPS_GREEN_LED, OUTPUT);   // Battery level indicator LED, green
-  pinMode(UPS_RED_LED, OUTPUT);   // Battery level indicator LED, red
-  pinMode(UPS_BLUE_LED, OUTPUT);   // Output refresh every 1 second, indicates Arduino cycle is running, blue
 
   /**
    * @fn setMaxChargeVoltage
@@ -109,28 +115,14 @@ void loop()
 
   iRunTimeToEmpty = (float)iAvgTimeToEmpty * iRemaining / 100;
 
-  // Adjust battery indicator LED based on the obtained battery capacity value iRemaining
-  digitalWrite(UPS_GREEN_LED, LOW);   // Turn on green LED;
-  digitalWrite(UPS_RED_LED, LOW);   // Turn on red LED;
-
-  if (iRemaining <= 25) {   // Battery capacity <= 25%, turn on red LED
-    digitalWrite(UPS_GREEN_LED, HIGH);   // Turn off green LED;
-  } else if ((iRemaining > 25) && (iRemaining < 75)) {   // 25% < Battery capacity < 75%, both red and green LEDs are on
-
-  } else if (iRemaining >= 75) {   // Battery capacity >= 75%, turn on green LED
-    digitalWrite(UPS_RED_LED, HIGH);   // Turn off red LED;
-  }
-
   // Refresh the values to be reported on USB-HID based on the obtained charge chip data
   flashReportedData();
 
   /************ Delay ***************************************/
-  delay(1000);
+  delayWithLeds(1000);
   iIntTimer++;
-  digitalWrite(UPS_BLUE_LED, LOW);   // 打开 蓝色 LED灯;
-  delay(1000);
+  delayWithLeds(1000);
   iIntTimer++;
-  digitalWrite(UPS_BLUE_LED, HIGH);   // 关掉 蓝色 LED灯;
 
   /************ 批量发送或中断 ***********************/
   if ((iPresentStatus != iPreviousStatus) || (iRemaining != iPrevRemaining) ||
@@ -141,11 +133,7 @@ void loop()
     if (bDischarging) PowerDevice.sendReport(HID_PD_RUNTIMETOEMPTY, &iRunTimeToEmpty, sizeof(iRunTimeToEmpty));
     iRes = PowerDevice.sendReport(HID_PD_PRESENTSTATUS, &iPresentStatus, sizeof(iPresentStatus));
 
-    if (iRes < 0) {   // Reporting return value: less than 0 indicates communication loss with the host
-      pinMode(UPS_BLUE_LED, INPUT);
-    } else {
-      pinMode(UPS_BLUE_LED, OUTPUT);
-    }
+    bCommsLost = (iRes < 0);   // Reporting return value: less than 0 indicates communication loss with the host
 
     iIntTimer = 0; // Reset reporting interval timer
     iPreviousStatus = iPresentStatus; // Save new device status
@@ -162,5 +150,61 @@ void loop()
   Serial.print("iRes = "); // Reporting return value, less than 0: indicates communication loss with host
   Serial.println(iRes);
   Serial.println();
+}
+
+// Alert-only LED indication (LEDs are active low: LOW = on), by priority:
+//   1. On battery and SOC critical: red/blue alternating fast
+//   2. On battery: red slow blink
+//   3. Host comms lost: blue blink
+//   4. Charging with low battery: green solid
+//   5. Normal (AC present, battery ok): all LEDs off
+void updateLeds(void)
+{
+  unsigned long now = millis();
+
+  // Critical latch with hysteresis; the exit check must run regardless of AC
+  // state so a latch set on battery cannot survive a full charge cycle
+  static bool bCritical = false;
+  if (iRemaining < LED_CRITICAL_SOC) {
+    bCritical = true;
+  } else if (iRemaining >= LED_CRITICAL_SOC_CLEAR) {
+    bCritical = false;
+  }
+
+  // Green charging band with hysteresis (SOC is ~1.5 points per ADC step)
+  static bool bShowCharge = false;
+  if (iRemaining <= LED_CHARGE_SHOW_SOC) {
+    bShowCharge = true;
+  } else if (iRemaining >= LED_CHARGE_HIDE_SOC) {
+    bShowCharge = false;
+  }
+
+  bool green = false, red = false, blue = false;   // true = lit
+
+  if (!bACPresent && bCritical) {
+    bool phase = (now / LED_FAST_PERIOD_MS) & 1;
+    red = phase;
+    blue = !phase;
+  } else if (!bACPresent) {
+    red = (now / LED_SLOW_PERIOD_MS) & 1;
+  } else if (bCommsLost) {
+    blue = (now / LED_FAST_PERIOD_MS) & 1;
+  } else if (bCharging && bShowCharge) {
+    green = true;
+  }
+
+  digitalWrite(UPS_GREEN_LED, green ? LOW : HIGH);
+  digitalWrite(UPS_RED_LED, red ? LOW : HIGH);
+  digitalWrite(UPS_BLUE_LED, blue ? LOW : HIGH);
+}
+
+// Blocking delay that keeps the LED blink patterns running
+void delayWithLeds(unsigned long ms)
+{
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    updateLeds();
+    delay(25);
+  }
 }
 

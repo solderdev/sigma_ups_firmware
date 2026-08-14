@@ -12,9 +12,17 @@
 #define MIN_BATTERY_VOLTAGE   12400   // Lower battery voltage limit
 #define MAX_BATTERY_VOLTAGE   16700   // Upper battery voltage limit
 
-#define UPS_GREEN_LED   9    // Battery level indicator LED, green
-#define UPS_RED_LED     10   // Battery level indicator LED, red
-#define UPS_BLUE_LED    13   // Output refresh every 1 second, indicates Arduino cycle is running, blue
+#define UPS_GREEN_LED   9    // Charging from low battery, green
+#define UPS_RED_LED     10   // On-battery / critical alert, red
+#define UPS_BLUE_LED    13   // Host comms lost / critical alert, blue
+
+// LED alert thresholds (battery capacity %), with hysteresis against SOC jitter
+#define LED_CRITICAL_SOC        40   // Enter critical alert below this when on battery
+#define LED_CRITICAL_SOC_CLEAR  43   // Leave critical alert at or above this
+#define LED_CHARGE_SHOW_SOC     50   // Show green while charging at or below this
+#define LED_CHARGE_HIDE_SOC     53   // Hide green again at or above this
+#define LED_SLOW_PERIOD_MS      1000 // Red on-battery blink half-period
+#define LED_FAST_PERIOD_MS      250  // Critical alternation / comms-lost blink half-period
 
 #define MIN_UPDATE_INTERVAL   26 // Minimum update interval for USB-HID
 
