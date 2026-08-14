@@ -149,3 +149,7 @@ AC the charge reading takes up to half a minute to settle.
   remote output cut, so power does not cycle when AC returns.
 - NUT talks to the HID interface only; `/dev/ttyACM0` (serial debug/flashing)
   is unaffected.
+- Reflashing the Arduino while the system is up is safe: the firmware waits
+  for a valid charger-chip read before serving USB-HID data, so NUT logs a
+  brief communication loss instead of acting on bogus power-up values
+  (which would otherwise read as "on battery, empty" and shut the host down).

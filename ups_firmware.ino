@@ -66,7 +66,23 @@ void setup(void)
    maxChargeVoltage = 15600;
    LPUPS.setMaxChargeVoltage(maxChargeVoltage);
 
-   // Initialize HIDPowerDevice
+  // Wait for a first valid chip read (VBAT ADC nonzero) before going online
+  // on USB-HID. The Arduino is routinely reflashed while the host is up: NUT
+  // reconnects within seconds, and reporting the zeroed power-up state (no AC
+  // present, 0 % charge) would read as "on battery, battery low" and force a
+  // host shutdown. Until the features are registered, HID feature requests
+  // stall and NUT just retries.
+  LPUPS.getChipData(regBuf);
+  printChargeData();
+  while (!batteryVoltage) {
+    Serial.println("VBAT ADC reads 0, waiting for valid chip data");
+    delay(1000);
+    LPUPS.getChipData(regBuf);
+    printChargeData();
+  }
+  updateBatteryState();
+
+  // Initialize HIDPowerDevice
   initPowerDevice();
 }
 
@@ -81,71 +97,7 @@ void loop()
   LPUPS.getChipData(regBuf);
   printChargeData();
 
-  // Feed the rolling voltage average. Skip samples where the VBAT ADC reads 0
-  // (dead ADC, or an I2C failure on the very first loop while regBuf is still
-  // zeroed; later I2C failures leave regBuf stale rather than zero).
-  if (batteryVoltage) {
-    if (!bVbatFilled) {
-      // Prefill with the first valid sample so boot doesn't report a low average
-      for (uint8_t i = 0; i < VBAT_SMOOTH_SAMPLES; i++) {
-        vbatSamples[i] = batteryVoltage;
-      }
-      vbatSum = (uint32_t)batteryVoltage * VBAT_SMOOTH_SAMPLES;
-      bVbatFilled = true;
-    } else {
-      vbatSum -= vbatSamples[vbatIndex];
-      vbatSamples[vbatIndex] = batteryVoltage;
-      vbatSum += batteryVoltage;
-      vbatIndex = (vbatIndex + 1) % VBAT_SMOOTH_SAMPLES;
-    }
-    smoothedVoltage = vbatSum / VBAT_SMOOTH_SAMPLES;
-
-    // Report smoothed pack voltage in centivolts (HID descriptor unit)
-    iVoltage = smoothedVoltage / 10;
-  }
-
-  /*********** Unit of measurement, measurement unit ****************************/
-  /**
-   * Battery voltage range: 12.3V ~ 16.8V, in order to keep the battery stable at extreme values:
-   * Assuming the battery voltage range is 12.4V ~ 16.7V, corresponding to battery capacity 0 ~ 100.
-   * Note: You can adjust the battery capacity more accurately by correcting the voltage mutation with dischargeCurrent if interested.
-   */
-  if (smoothedVoltage > MIN_BATTERY_VOLTAGE) {
-    iRemaining = (((float)smoothedVoltage - MIN_BATTERY_VOLTAGE) / (MAX_BATTERY_VOLTAGE - MIN_BATTERY_VOLTAGE)) * 100;
-  } else if (bVbatFilled) {
-    // The averaged voltage at/below the 0 % point is a genuine deep discharge,
-    // not a transient — report empty.
-    iRemaining = 0;
-    Serial.println("The battery voltage is lower than normal !!!");   // Battery voltage lower than normal value.
-  }
-
-  if (100 < iRemaining) {
-    iRemaining = 100;
-  }
-
-  // Please ensure to use the dedicated charger for LattePanda and connect it to the UPS (connect it to LP). 
-  if (chargerStatus1.ac_stat) {   // check if there is charging current.
-    bACPresent = true;
-    if (64 < chargeCurrent) {   // Check if there is charging current. Due to precision issues, current less than 64 is considered as fully charged.
-      bCharging = true;
-    } else {
-      bCharging = false;
-    }
-    bDischarging = false;
-  } else {
-    bACPresent = false;
-    bCharging = false;
-    if (dischargeCurrent) {   // Check if there is discharging current.
-      bDischarging = true;
-    } else {
-      bDischarging = false;
-    }
-  }
-
-  iRunTimeToEmpty = (float)iAvgTimeToEmpty * iRemaining / 100;
-
-  // Refresh the values to be reported on USB-HID based on the obtained charge chip data
-  flashReportedData();
+  updateBatteryState();
 
   /************ Delay ***************************************/
   delayWithLeds(1000);
@@ -185,6 +137,79 @@ void loop()
   Serial.print("iRes = "); // Reporting return value, less than 0: indicates communication loss with host
   Serial.println(iRes);
   Serial.println();
+}
+
+// Derive all USB-HID reported values from the last chip read: smoothed pack
+// voltage, remaining capacity, AC/charging/discharging flags and status bits.
+// Also called from setup() before the HID features are registered, so a host
+// that is already up never sees the zeroed power-up state.
+void updateBatteryState(void)
+{
+  // Feed the rolling voltage average. Skip samples where the VBAT ADC reads 0
+  // (dead ADC; setup waits for a first valid read, and later I2C failures
+  // leave regBuf stale rather than zero).
+  if (batteryVoltage) {
+    if (!bVbatFilled) {
+      // Prefill with the first valid sample so boot doesn't report a low average
+      for (uint8_t i = 0; i < VBAT_SMOOTH_SAMPLES; i++) {
+        vbatSamples[i] = batteryVoltage;
+      }
+      vbatSum = (uint32_t)batteryVoltage * VBAT_SMOOTH_SAMPLES;
+      bVbatFilled = true;
+    } else {
+      vbatSum -= vbatSamples[vbatIndex];
+      vbatSamples[vbatIndex] = batteryVoltage;
+      vbatSum += batteryVoltage;
+      vbatIndex = (vbatIndex + 1) % VBAT_SMOOTH_SAMPLES;
+    }
+    smoothedVoltage = vbatSum / VBAT_SMOOTH_SAMPLES;
+
+    // Report smoothed pack voltage in centivolts (HID descriptor unit)
+    iVoltage = smoothedVoltage / 10;
+  }
+
+  /*********** Unit of measurement, measurement unit ****************************/
+  /**
+   * Battery voltage range: 12.3V ~ 16.8V, in order to keep the battery stable at extreme values:
+   * Assuming the battery voltage range is 12.4V ~ 16.7V, corresponding to battery capacity 0 ~ 100.
+   * Note: You can adjust the battery capacity more accurately by correcting the voltage mutation with dischargeCurrent if interested.
+   */
+  if (smoothedVoltage > MIN_BATTERY_VOLTAGE) {
+    iRemaining = (((float)smoothedVoltage - MIN_BATTERY_VOLTAGE) / (MAX_BATTERY_VOLTAGE - MIN_BATTERY_VOLTAGE)) * 100;
+  } else if (bVbatFilled) {
+    // The averaged voltage at/below the 0 % point is a genuine deep discharge,
+    // not a transient — report empty.
+    iRemaining = 0;
+    Serial.println("The battery voltage is lower than normal !!!");   // Battery voltage lower than normal value.
+  }
+
+  if (100 < iRemaining) {
+    iRemaining = 100;
+  }
+
+  // Please ensure to use the dedicated charger for LattePanda and connect it to the UPS (connect it to LP).
+  if (chargerStatus1.ac_stat) {   // check if there is charging current.
+    bACPresent = true;
+    if (64 < chargeCurrent) {   // Check if there is charging current. Due to precision issues, current less than 64 is considered as fully charged.
+      bCharging = true;
+    } else {
+      bCharging = false;
+    }
+    bDischarging = false;
+  } else {
+    bACPresent = false;
+    bCharging = false;
+    if (dischargeCurrent) {   // Check if there is discharging current.
+      bDischarging = true;
+    } else {
+      bDischarging = false;
+    }
+  }
+
+  iRunTimeToEmpty = (float)iAvgTimeToEmpty * iRemaining / 100;
+
+  // Refresh the values to be reported on USB-HID based on the obtained charge chip data
+  flashReportedData();
 }
 
 // Alert-only LED indication (LEDs are active low: LOW = on), by priority:
