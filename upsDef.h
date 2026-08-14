@@ -36,6 +36,8 @@ extern uint16_t batteryVoltage, maxChargeVoltage;
 extern byte iRemaining;
 extern bool bCharging, bACPresent, bDischarging; // Whether charging, AC power present, discharging
 
+extern uint16_t iVoltage;   // Battery voltage in centivolts, as reported via USB-HID
+
 extern uint16_t iRunTimeToEmpty, iAvgTimeToEmpty;   // 12
 
 extern uint16_t iPresentStatus;   // Now and previous device status.

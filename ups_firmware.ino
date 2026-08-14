@@ -19,6 +19,7 @@ uint16_t iPreviousStatus = 0;   // Now and previous device status.
 byte iRemaining = 0, iPrevRemaining = 100;
 int iRes = 0;
 uint16_t iPrevRunTimeToEmpty = 0;
+uint16_t iPrevVoltage = 0;
 
 int iIntTimer = 0; // Update interval counter
 
@@ -73,6 +74,12 @@ void loop()
   LPUPS.getChipData(regBuf);
   printChargeData();
 
+  // Report measured pack voltage in centivolts (HID descriptor unit).
+  // Keep the last good value if the VBAT ADC reads 0 (e.g. failed I2C read).
+  if (batteryVoltage) {
+    iVoltage = batteryVoltage / 10;
+  }
+
   /*********** Unit of measurement, measurement unit ****************************/
   /**
    * Battery voltage range: 12.3V ~ 16.8V, in order to keep the battery stable at extreme values:
@@ -126,11 +133,13 @@ void loop()
 
   /************ Batch send or send on change ***********************/
   if ((iPresentStatus != iPreviousStatus) || (iRemaining != iPrevRemaining) ||
-    (iRunTimeToEmpty != iPrevRunTimeToEmpty) || (iIntTimer > MIN_UPDATE_INTERVAL)) {
+    (iRunTimeToEmpty != iPrevRunTimeToEmpty) || (iVoltage != iPrevVoltage) ||
+    (iIntTimer > MIN_UPDATE_INTERVAL)) {
 
     // 12 INPUT OR FEATURE(required by Windows)
     PowerDevice.sendReport(HID_PD_REMAININGCAPACITY, &iRemaining, sizeof(iRemaining));
     if (bDischarging) PowerDevice.sendReport(HID_PD_RUNTIMETOEMPTY, &iRunTimeToEmpty, sizeof(iRunTimeToEmpty));
+    PowerDevice.sendReport(HID_PD_VOLTAGE, &iVoltage, sizeof(iVoltage));
     iRes = PowerDevice.sendReport(HID_PD_PRESENTSTATUS, &iPresentStatus, sizeof(iPresentStatus));
 
     bCommsLost = (iRes < 0);   // Reporting return value: less than 0 indicates communication loss with the host
@@ -139,6 +148,7 @@ void loop()
     iPreviousStatus = iPresentStatus; // Save new device status
     iPrevRemaining = iRemaining; // Save new battery remaining capacity
     iPrevRunTimeToEmpty = iRunTimeToEmpty; // Save new estimated battery runtime count
+    iPrevVoltage = iVoltage; // Save new reported battery voltage
 
   }
 

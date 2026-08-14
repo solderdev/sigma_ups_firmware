@@ -29,9 +29,9 @@ uint16_t iPresentStatus = 0;   // Now and previous device status.
 byte bRechargable = 1;   // Rechargeable Battery (1)/Not Rechargeable Battery (0)
 byte bCapacityMode = 2;   // In the data manual, "2" represents battery capacity in percentage.
 
-// Physical parameters.
-const uint16_t iConfigVoltage = MAX_BATTERY_VOLTAGE;   // Nominal value of the voltage.
-uint16_t iVoltage = MAX_BATTERY_VOLTAGE;
+// Physical parameters. The HID descriptor declares voltage fields in centivolts.
+const uint16_t iConfigVoltage = MAX_BATTERY_VOLTAGE / 10;   // Nominal value of the voltage.
+uint16_t iVoltage = MAX_BATTERY_VOLTAGE / 10;
 uint16_t iRunTimeToEmpty = 0;
 uint16_t iAvgTimeToFull = 7200;
 uint16_t iAvgTimeToEmpty = 7200;   // 12
