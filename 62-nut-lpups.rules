@@ -1,0 +1,13 @@
+# LattePanda Leonardo UPS (usb 3343:803a) — NUT integration.
+# Install (see README):
+#   sudo install -m 644 62-nut-lpups.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+
+# Grant the nut user access; DFRobot's vendor ID is not in NUT's shipped rules.
+SUBSYSTEM=="usb", ATTR{idVendor}=="3343", ATTR{idProduct}=="803a", MODE="0660", GROUP="nut"
+
+# Restart the NUT driver whenever the board (re-)enumerates, e.g. after
+# `make flash`. usbhid-ups 2.8.5 keeps running after the USB disconnect but
+# never reconnects, leaving `upsc lpups` at "Data stale"; the process doesn't
+# exit, so the unit's Restart=always never fires either.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="3343", ATTR{idProduct}=="803a", RUN+="/usr/bin/systemctl --no-block restart nut-driver@lpups.service"

@@ -28,14 +28,17 @@ sudo pacman -S nut
 
 ### 2. udev rule
 
-DFRobot's USB vendor ID is not in NUT's shipped rules, so the `nut` user needs
-access granted manually. Create `/etc/udev/rules.d/62-nut-lpups.rules`:
+Install `62-nut-lpups.rules` from this repo:
 
-```
-SUBSYSTEM=="usb", ATTR{idVendor}=="3343", ATTR{idProduct}=="803a", MODE="0660", GROUP="nut"
+```sh
+sudo install -m 644 62-nut-lpups.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-Then reload: `sudo udevadm control --reload && sudo udevadm trigger`
+It does two things: grants the `nut` user access to the device (DFRobot's USB
+vendor ID is not in NUT's shipped rules), and restarts `nut-driver@lpups`
+whenever the board (re-)enumerates — required after reflashing, see
+"Restarting the services" below.
 
 ### 3. Config files in `/etc/nut/`
 
@@ -132,6 +135,24 @@ loss it becomes `OB` (on battery), and at <20 % it becomes `OB LB`; once that
 state has persisted for `OBLBDURATION` (~15–20 s including poll timing),
 upsmon shuts the system down.
 
+### 7. Restarting the services
+
+Which service to restart after changing what:
+
+```sh
+sudo systemctl restart nut-driver@lpups.service   # after ups.conf changes, reflash, or USB replug
+sudo systemctl restart nut-server.service         # after upsd.conf / upsd.users changes
+sudo systemctl restart nut-monitor.service        # after upsmon.conf changes
+```
+
+A driver restart after reflashing/replugging is mandatory: usbhid-ups 2.8.5
+never reconnects once the USB device drops — it logs a single
+`nut_libusb_get_interrupt: No such device` and then idles, leaving `upsc`
+at "Data stale" indefinitely (the process doesn't exit, so the unit's
+`Restart=always` never kicks in either). The udev rule from step 2 automates
+this: with it installed, `make flash` needs no manual follow-up — the driver
+is restarted as soon as the board comes back on USB.
+
 ### Testing the shutdown path
 
 Either run a full drill with `sudo upsmon -c fsd` (**immediately** shuts down),
@@ -150,6 +171,8 @@ AC the charge reading takes up to half a minute to settle.
 - NUT talks to the HID interface only; `/dev/ttyACM0` (serial debug/flashing)
   is unaffected.
 - Reflashing the Arduino while the system is up is safe: the firmware waits
-  for a valid charger-chip read before serving USB-HID data, so NUT logs a
-  brief communication loss instead of acting on bogus power-up values
-  (which would otherwise read as "on battery, empty" and shut the host down).
+  for a valid charger-chip read before serving USB-HID data, so a
+  (re)connecting driver never sees the bogus power-up values (which would
+  read as "on battery, empty" and shut the host down). The driver itself
+  won't reconnect on its own, though — see "Restarting the services" above
+  for the manual command and the udev rule that automates it.
