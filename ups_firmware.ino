@@ -25,6 +25,13 @@ int iIntTimer = 0; // Update interval counter
 
 bool bCommsLost = false;   // Last HID report to the host failed
 
+// Rolling average of the measured pack voltage (see VBAT_SMOOTH_SAMPLES)
+uint16_t vbatSamples[VBAT_SMOOTH_SAMPLES];
+uint32_t vbatSum = 0;   // 16 samples of up to 19200 mV exceed uint16_t
+uint8_t vbatIndex = 0;
+bool bVbatFilled = false;   // Buffer has been prefilled with a valid sample
+uint16_t smoothedVoltage = 0;   // Averaged pack voltage in mV, 0 until filled
+
 
 void setup(void)
 {
@@ -74,12 +81,27 @@ void loop()
   LPUPS.getChipData(regBuf);
   printChargeData();
 
-  // Report measured pack voltage in centivolts (HID descriptor unit).
-  // Keep the last good value if the VBAT ADC reads 0 (dead ADC, or an I2C
-  // failure on the very first loop while regBuf is still zeroed; later I2C
-  // failures leave regBuf stale rather than zero).
+  // Feed the rolling voltage average. Skip samples where the VBAT ADC reads 0
+  // (dead ADC, or an I2C failure on the very first loop while regBuf is still
+  // zeroed; later I2C failures leave regBuf stale rather than zero).
   if (batteryVoltage) {
-    iVoltage = batteryVoltage / 10;
+    if (!bVbatFilled) {
+      // Prefill with the first valid sample so boot doesn't report a low average
+      for (uint8_t i = 0; i < VBAT_SMOOTH_SAMPLES; i++) {
+        vbatSamples[i] = batteryVoltage;
+      }
+      vbatSum = (uint32_t)batteryVoltage * VBAT_SMOOTH_SAMPLES;
+      bVbatFilled = true;
+    } else {
+      vbatSum -= vbatSamples[vbatIndex];
+      vbatSamples[vbatIndex] = batteryVoltage;
+      vbatSum += batteryVoltage;
+      vbatIndex = (vbatIndex + 1) % VBAT_SMOOTH_SAMPLES;
+    }
+    smoothedVoltage = vbatSum / VBAT_SMOOTH_SAMPLES;
+
+    // Report smoothed pack voltage in centivolts (HID descriptor unit)
+    iVoltage = smoothedVoltage / 10;
   }
 
   /*********** Unit of measurement, measurement unit ****************************/
@@ -88,9 +110,12 @@ void loop()
    * Assuming the battery voltage range is 12.4V ~ 16.7V, corresponding to battery capacity 0 ~ 100.
    * Note: You can adjust the battery capacity more accurately by correcting the voltage mutation with dischargeCurrent if interested.
    */
-  if (batteryVoltage > MIN_BATTERY_VOLTAGE) {
-    iRemaining = (((float)batteryVoltage - MIN_BATTERY_VOLTAGE) / (MAX_BATTERY_VOLTAGE - MIN_BATTERY_VOLTAGE)) * 100;
-  } else {
+  if (smoothedVoltage > MIN_BATTERY_VOLTAGE) {
+    iRemaining = (((float)smoothedVoltage - MIN_BATTERY_VOLTAGE) / (MAX_BATTERY_VOLTAGE - MIN_BATTERY_VOLTAGE)) * 100;
+  } else if (bVbatFilled) {
+    // The averaged voltage at/below the 0 % point is a genuine deep discharge,
+    // not a transient — report empty.
+    iRemaining = 0;
     Serial.println("The battery voltage is lower than normal !!!");   // Battery voltage lower than normal value.
   }
 
@@ -108,11 +133,6 @@ void loop()
     }
     bDischarging = false;
   } else {
-    if (iPrevRemaining < iRemaining) {
-      if (3 >= (iRemaining - iPrevRemaining))
-        iRemaining = iPrevRemaining;
-    }
-
     bACPresent = false;
     bCharging = false;
     if (dischargeCurrent) {   // Check if there is discharging current.
@@ -134,8 +154,11 @@ void loop()
   iIntTimer++;
 
   /************ Batch send or send on change ***********************/
+  // Voltage uses a ±1 cV deadband: residual averaging jitter can still toggle
+  // the last centivolt digit, and the interval timer guarantees periodic sends.
   if ((iPresentStatus != iPreviousStatus) || (iRemaining != iPrevRemaining) ||
-    (iRunTimeToEmpty != iPrevRunTimeToEmpty) || (iVoltage != iPrevVoltage) ||
+    (iRunTimeToEmpty != iPrevRunTimeToEmpty) ||
+    (abs((int16_t)iVoltage - (int16_t)iPrevVoltage) > 1) ||
     (iIntTimer > MIN_UPDATE_INTERVAL)) {
 
     // 12 INPUT OR FEATURE(required by Windows)

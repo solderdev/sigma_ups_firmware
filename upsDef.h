@@ -24,6 +24,12 @@
 #define LED_SLOW_PERIOD_MS      1000 // Red on-battery blink half-period
 #define LED_FAST_PERIOD_MS      250  // Critical alternation / comms-lost blink half-period
 
+// Rolling-average window for pack voltage, in loop iterations (~2 s each).
+// One VBAT ADC LSB (64 mV) is ~1.5 capacity points, so a single sample sagged
+// by a load spike can cross the host's 20 % shutdown threshold; ~32 s of
+// smoothing rides out spikes while adding negligible lag to a real discharge.
+#define VBAT_SMOOTH_SAMPLES   16
+
 #define MIN_UPDATE_INTERVAL   26 // Minimum update interval for USB-HID
 
 #define DATA_LEN_MAX   0x24U

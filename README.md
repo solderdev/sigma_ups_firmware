@@ -6,7 +6,9 @@ standard **USB HID power device** (UPS class, `3343:803a`), reporting charge
 percentage, runtime estimate and AC/charging/discharging status.
 
 - Build: `make build` — flashing is done manually, then `make monitor`.
-- Charge % is derived linearly from pack voltage (12.4 V = 0 %, 16.7 V = 100 %).
+- Charge % is derived linearly from pack voltage (12.4 V = 0 %, 16.7 V = 100 %),
+  smoothed over a ~32 s rolling average so load-spike sag can't fake a
+  low-battery reading.
 - Max charge voltage is limited to 15.6 V (3.9 V/cell) for battery longevity.
 - The firmware's own low-battery flag only fires below ~8 % (runtime < 600 s),
   and it cannot cut output power — shutdown policy is therefore handled on the
@@ -89,6 +91,10 @@ POLLFREQ 5
 POLLFREQALERT 5
 DEADTIME 15
 POWERDOWNFLAG /etc/killpower
+# Require OB LB to persist ~3-4 polls before forcing shutdown, so a brief
+# status glitch can't power the system off (the firmware also smooths the
+# voltage; this is a host-side backstop).
+OBLBDURATION 15
 ```
 
 Config files contain the password, so restrict them:
@@ -122,14 +128,19 @@ upsc lpups                       # battery.charge, battery.runtime, ups.status
 ```
 
 `ups.status` should be `OL CHRG` (on line, charging) or `OL` (full). On AC
-loss it becomes `OB` (on battery), and at <20 % it becomes `OB LB`, upon which
-upsmon shuts the system down within one poll cycle (~5 s).
+loss it becomes `OB` (on battery), and at <20 % it becomes `OB LB`; once that
+state has persisted for `OBLBDURATION` (~15–20 s including poll timing),
+upsmon shuts the system down.
 
 ### Testing the shutdown path
 
 Either run a full drill with `sudo upsmon -c fsd` (**immediately** shuts down),
 or temporarily set `override.battery.charge.low = 90` in `ups.conf`, restart
-`nut-driver@lpups`, unplug AC and watch it power off. Remember to revert to 20.
+`nut-driver@lpups`, unplug AC and watch it power off — expect it ~15–20 s
+after `OB LB` appears, due to `OBLBDURATION`. Remember to revert to 20.
+
+Note the firmware smooths the reported voltage over ~32 s, so after unplugging
+AC the charge reading takes up to half a minute to settle.
 
 ### Notes
 
