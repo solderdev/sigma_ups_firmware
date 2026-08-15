@@ -23,7 +23,9 @@ uint16_t iPrevVoltage = 0;
 
 int iIntTimer = 0; // Update interval counter
 
-bool bCommsLost = false;   // Last HID report to the host failed
+bool bCommsLost = false;   // No report accepted by the host for COMMS_LOST_TIMEOUT_MS
+unsigned long lastReportOkMs = 0;   // millis() of the last report the host accepted
+bool bRetrySend = false;   // Last burst delivered nothing; retry next loop
 
 // Active LED pattern, set by updateLeds() for serial debugging. Kept in flash
 // via F(): RAM is nearly full, so these strings must not land in .data.
@@ -89,6 +91,10 @@ void setup(void)
 
   // Initialize HIDPowerDevice
   initPowerDevice();
+
+  // Boot grace: anchor the comms-lost clock now so the host driver's restart
+  // after a reflash (~11 s via the udev rule) never shows a spurious blue phase.
+  lastReportOkMs = millis();
 }
 
 
@@ -116,15 +122,21 @@ void loop()
   if ((iPresentStatus != iPreviousStatus) || (iRemaining != iPrevRemaining) ||
     (iRunTimeToEmpty != iPrevRunTimeToEmpty) ||
     (abs((int16_t)iVoltage - (int16_t)iPrevVoltage) > 1) ||
-    (iIntTimer > MIN_UPDATE_INTERVAL)) {
+    (iIntTimer > MIN_UPDATE_INTERVAL) || bRetrySend ||
+    (millis() - lastReportOkMs > COMMS_KEEPALIVE_MS)) {
 
     // 12 INPUT OR FEATURE(required by Windows)
-    PowerDevice.sendReport(HID_PD_REMAININGCAPACITY, &iRemaining, sizeof(iRemaining));
-    if (bDischarging) PowerDevice.sendReport(HID_PD_RUNTIMETOEMPTY, &iRunTimeToEmpty, sizeof(iRunTimeToEmpty));
-    PowerDevice.sendReport(HID_PD_VOLTAGE, &iVoltage, sizeof(iVoltage));
+    // Success of any attempted send proves the host is draining the interrupt
+    // endpoint; the skipped RUNTIMETOEMPTY send must not count as a failure.
+    bool anyOk = false;
+    anyOk |= (PowerDevice.sendReport(HID_PD_REMAININGCAPACITY, &iRemaining, sizeof(iRemaining)) >= 0);
+    if (bDischarging) anyOk |= (PowerDevice.sendReport(HID_PD_RUNTIMETOEMPTY, &iRunTimeToEmpty, sizeof(iRunTimeToEmpty)) >= 0);
+    anyOk |= (PowerDevice.sendReport(HID_PD_VOLTAGE, &iVoltage, sizeof(iVoltage)) >= 0);
     iRes = PowerDevice.sendReport(HID_PD_PRESENTSTATUS, &iPresentStatus, sizeof(iPresentStatus));
+    anyOk |= (iRes >= 0);
 
-    bCommsLost = (iRes < 0);   // Reporting return value: less than 0 indicates communication loss with the host
+    if (anyOk) lastReportOkMs = millis();
+    bRetrySend = !anyOk;   // Fully failed burst: retry next loop instead of waiting out the interval
 
     iIntTimer = 0; // Reset reporting interval timer
     iPreviousStatus = iPresentStatus; // Save new device status
@@ -134,13 +146,20 @@ void loop()
 
   }
 
+  // Comms lost = nothing accepted for COMMS_LOST_TIMEOUT_MS. Individual send
+  // failures are routine (250 ms bank timeout vs the host's ~2 s poll cycle);
+  // unsigned arithmetic keeps this millis()-wrap safe.
+  bCommsLost = (millis() - lastReportOkMs > COMMS_LOST_TIMEOUT_MS);
+
   /************ Serial print reported battery level and operation result ******************/
   Serial.print("iRemaining = "); // Battery remaining capacity percentage
   Serial.println(iRemaining);
   Serial.print("iRunTimeToEmpty = "); // Estimated time to empty battery
   Serial.println(iRunTimeToEmpty);
-  Serial.print("iRes = "); // Reporting return value, less than 0: indicates communication loss with host
+  Serial.print("iRes = "); // Last PRESENTSTATUS send result; a lone -1 is normal (endpoint bank busy)
   Serial.println(iRes);
+  Serial.print(F("lastOk age = ")); // Seconds since the host last accepted a report
+  Serial.println((millis() - lastReportOkMs) / 1000);
   Serial.print(F("LEDs = ")); // Active LED pattern chosen by updateLeds()
   Serial.println(ledPattern);
   Serial.println();

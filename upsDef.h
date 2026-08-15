@@ -32,6 +32,20 @@
 
 #define MIN_UPDATE_INTERVAL   26 // Minimum update interval for USB-HID
 
+// Comms-lost threshold: no report accepted by the host for this long.
+// A single USB_Send waits only 250 ms for an interrupt endpoint bank while
+// NUT drains the endpoint on a ~2 s poll cycle, so individual send failures
+// are normal; only a sustained failure to deliver anything means the host
+// is gone.
+#define COMMS_LOST_TIMEOUT_MS 15000UL
+
+// Keepalive: force a report burst when nothing has been accepted for this
+// long, so a healthy host resets the comms-lost clock well before the
+// timeout. Must be enough below COMMS_LOST_TIMEOUT_MS to fit a few ~2 s
+// retries; without it the age would coast past the timeout during quiet
+// stretches, since on-change sends can be up to ~28 s apart.
+#define COMMS_KEEPALIVE_MS 8000UL
+
 #define DATA_LEN_MAX   0x24U
 extern uint8_t regBuf[DATA_LEN_MAX];
 
