@@ -25,6 +25,10 @@ int iIntTimer = 0; // Update interval counter
 
 bool bCommsLost = false;   // Last HID report to the host failed
 
+// Active LED pattern, set by updateLeds() for serial debugging. Kept in flash
+// via F(): RAM is nearly full, so these strings must not land in .data.
+const __FlashStringHelper* ledPattern;
+
 // Rolling average of the measured pack voltage (see VBAT_SMOOTH_SAMPLES)
 uint16_t vbatSamples[VBAT_SMOOTH_SAMPLES];
 uint32_t vbatSum = 0;   // 16 samples of up to 19200 mV exceed uint16_t
@@ -40,6 +44,7 @@ void setup(void)
   digitalWrite(UPS_GREEN_LED, HIGH);
   digitalWrite(UPS_RED_LED, HIGH);
   digitalWrite(UPS_BLUE_LED, HIGH);
+  ledPattern = F("off");
   pinMode(UPS_GREEN_LED, OUTPUT);
   pinMode(UPS_RED_LED, OUTPUT);
   pinMode(UPS_BLUE_LED, OUTPUT);
@@ -136,6 +141,8 @@ void loop()
   Serial.println(iRunTimeToEmpty);
   Serial.print("iRes = "); // Reporting return value, less than 0: indicates communication loss with host
   Serial.println(iRes);
+  Serial.print(F("LEDs = ")); // Active LED pattern chosen by updateLeds()
+  Serial.println(ledPattern);
   Serial.println();
 }
 
@@ -245,12 +252,18 @@ void updateLeds(void)
     bool phase = (now / LED_FAST_PERIOD_MS) & 1;
     red = phase;
     blue = !phase;
+    ledPattern = F("red/blue alternating (on battery, critical)");
   } else if (!bACPresent) {
     red = (now / LED_SLOW_PERIOD_MS) & 1;
+    ledPattern = F("red slow blink (on battery)");
   } else if (bCommsLost) {
     blue = (now / LED_FAST_PERIOD_MS) & 1;
+    ledPattern = F("blue fast blink (comms lost)");
   } else if (bCharging && bShowCharge) {
     green = true;
+    ledPattern = F("green solid (charging)");
+  } else {
+    ledPattern = F("off");
   }
 
   digitalWrite(UPS_GREEN_LED, green ? LOW : HIGH);
