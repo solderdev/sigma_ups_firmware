@@ -153,6 +153,20 @@ at "Data stale" indefinitely (the process doesn't exit, so the unit's
 this: with it installed, `make flash` needs no manual follow-up — the driver
 is restarted as soon as the board comes back on USB.
 
+### Useful commands
+
+```sh
+upsc lpups                                        # all UPS variables (charge, runtime, status)
+upsc lpups ups.status                             # just the status (OL / OB / OB LB)
+journalctl -u nut-driver@lpups -f                 # follow driver log (reconnects, stale data, USB errors)
+journalctl -u nut-monitor -f                      # follow upsmon log (on-battery / low-battery / shutdown events)
+make monitor                                      # firmware debug output on /dev/ttyACM0
+lsusb -v -d 3343:803a                             # inspect the composite USB device (interfaces/endpoints)
+sudo /usr/lib/nut/usbhid-ups -a lpups -d1 -DD     # one debug poll cycle without the service (stop it first)
+systemctl status nut-driver@lpups nut-server nut-monitor   # health of all three services at a glance
+sudo systemctl restart nut-driver@lpups           # kick the driver (fixes "Data stale"; see step 7 for the others)
+```
+
 ### Testing the shutdown path
 
 Either run a full drill with `sudo upsmon -c fsd` (**immediately** shuts down),
