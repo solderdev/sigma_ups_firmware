@@ -30,20 +30,20 @@
 // smoothing rides out spikes while adding negligible lag to a real discharge.
 #define VBAT_SMOOTH_SAMPLES   16
 
-#define MIN_UPDATE_INTERVAL   26 // Minimum update interval for USB-HID
-
-// Comms-lost threshold: no report accepted by the host for this long.
-// A single USB_Send waits only 250 ms for an interrupt endpoint bank while
-// NUT drains the endpoint on a ~2 s poll cycle, so individual send failures
-// are normal; only a sustained failure to deliver anything means the host
-// is gone.
+// Comms-lost threshold: no report delivered into a free endpoint bank for
+// this long. A single USB_Send waits only 250 ms for a bank while NUT drains
+// the endpoint on a ~2 s poll cycle, so individual send failures are normal;
+// only a sustained failure to deliver anything means the host is gone.
+// The endpoint is double-banked: up to two sends can still succeed after the
+// host stops reading, so worst-case detection is one keepalive period plus
+// this timeout (~23 s), best case ~14 s.
 #define COMMS_LOST_TIMEOUT_MS 15000UL
 
-// Keepalive: force a report burst when nothing has been accepted for this
+// Keepalive: force a report burst when nothing has been delivered for this
 // long, so a healthy host resets the comms-lost clock well before the
 // timeout. Must be enough below COMMS_LOST_TIMEOUT_MS to fit a few ~2 s
-// retries; without it the age would coast past the timeout during quiet
-// stretches, since on-change sends can be up to ~28 s apart.
+// retries. This is also the periodic send cadence: reports go out at least
+// every ~8-10 s even when no value changes.
 #define COMMS_KEEPALIVE_MS 8000UL
 
 #define DATA_LEN_MAX   0x24U

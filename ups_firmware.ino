@@ -21,10 +21,11 @@ int iRes = 0;
 uint16_t iPrevRunTimeToEmpty = 0;
 uint16_t iPrevVoltage = 0;
 
-int iIntTimer = 0; // Update interval counter
-
-bool bCommsLost = false;   // No report accepted by the host for COMMS_LOST_TIMEOUT_MS
-unsigned long lastReportOkMs = 0;   // millis() of the last report the host accepted
+bool bCommsLost = false;   // No report delivered to the host for COMMS_LOST_TIMEOUT_MS
+// millis() of the last report that entered a free endpoint bank. The endpoint
+// is double-banked, so this proves the host was draining it recently, not
+// that it saw this very report; see COMMS_LOST_TIMEOUT_MS in upsDef.h.
+unsigned long lastReportOkMs = 0;
 bool bRetrySend = false;   // Last burst delivered nothing; retry next loop
 
 // Active LED pattern, set by updateLeds() for serial debugging. Kept in flash
@@ -111,23 +112,21 @@ void loop()
   updateBatteryState();
 
   /************ Delay ***************************************/
-  delayWithLeds(1000);
-  iIntTimer++;
-  delayWithLeds(1000);
-  iIntTimer++;
+  delayWithLeds(2000);
 
   /************ Batch send or send on change ***********************/
   // Voltage uses a ±1 cV deadband: residual averaging jitter can still toggle
-  // the last centivolt digit, and the interval timer guarantees periodic sends.
+  // the last centivolt digit, and the keepalive guarantees periodic sends.
   if ((iPresentStatus != iPreviousStatus) || (iRemaining != iPrevRemaining) ||
     (iRunTimeToEmpty != iPrevRunTimeToEmpty) ||
     (abs((int16_t)iVoltage - (int16_t)iPrevVoltage) > 1) ||
-    (iIntTimer > MIN_UPDATE_INTERVAL) || bRetrySend ||
+    bRetrySend ||
     (millis() - lastReportOkMs > COMMS_KEEPALIVE_MS)) {
 
     // 12 INPUT OR FEATURE(required by Windows)
-    // Success of any attempted send proves the host is draining the interrupt
-    // endpoint; the skipped RUNTIMETOEMPTY send must not count as a failure.
+    // Success of any attempted send means a bank was free, i.e. the host has
+    // been draining the endpoint; the skipped RUNTIMETOEMPTY send must not
+    // count as a failure.
     bool anyOk = false;
     anyOk |= (PowerDevice.sendReport(HID_PD_REMAININGCAPACITY, &iRemaining, sizeof(iRemaining)) >= 0);
     if (bDischarging) anyOk |= (PowerDevice.sendReport(HID_PD_RUNTIMETOEMPTY, &iRunTimeToEmpty, sizeof(iRunTimeToEmpty)) >= 0);
@@ -136,9 +135,8 @@ void loop()
     anyOk |= (iRes >= 0);
 
     if (anyOk) lastReportOkMs = millis();
-    bRetrySend = !anyOk;   // Fully failed burst: retry next loop instead of waiting out the interval
+    bRetrySend = !anyOk;   // Fully failed burst: retry next loop instead of waiting for the keepalive
 
-    iIntTimer = 0; // Reset reporting interval timer
     iPreviousStatus = iPresentStatus; // Save new device status
     iPrevRemaining = iRemaining; // Save new battery remaining capacity
     iPrevRunTimeToEmpty = iRunTimeToEmpty; // Save new estimated battery runtime count
