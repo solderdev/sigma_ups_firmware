@@ -137,7 +137,10 @@ void loop()
     if (anyOk) lastReportOkMs = millis();
     bRetrySend = !anyOk;   // Fully failed burst: retry next loop instead of waiting for the keepalive
 
-    iPreviousStatus = iPresentStatus; // Save new device status
+    // Consume the status change only if its own send was accepted; otherwise
+    // the difference persists and the burst retries next loop instead of
+    // deferring the change to the next keepalive.
+    if (iRes >= 0) iPreviousStatus = iPresentStatus;
     iPrevRemaining = iRemaining; // Save new battery remaining capacity
     iPrevRunTimeToEmpty = iRunTimeToEmpty; // Save new estimated battery runtime count
     iPrevVoltage = iVoltage; // Save new reported battery voltage
