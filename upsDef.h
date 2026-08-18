@@ -16,6 +16,24 @@
 #define UPS_RED_LED     10   // On-battery / critical alert, red
 #define UPS_BLUE_LED    13   // Host comms lost / critical alert, blue
 
+// Host auto power-on: D5 pulses the Sigma's front-panel PWR_SW header
+// (open-drain: INPUT idle, OUTPUT-low = press; never driven high), D6/A7
+// senses PWR_LED+ through an external ~100k pull-down so a floating or
+// disconnected line reads "off".
+#define HOST_PWR_BTN_PIN   5
+#define HOST_PWR_LED_ADC   A7     // A7 is the ADC channel of digital pin 6
+#define PWR_LED_ON_ADC_MIN 300    // ~1.5 V at 5 V AREF; calibrate via serial ADC output
+#define PWR_LED_ON_SAMPLES 3      // Consecutive on-reads to count as "on": one coupled
+                                  // noise spike on the 100k node must not reset the
+                                  // off-timer; 75 ms still catches any S3 blink phase
+
+#define PWR_BTN_PULSE_MS   300      // Momentary press: above debounce, far below 4 s force-off
+#define PWRON_LED_OFF_MS   60000UL  // LED continuously off this long = host is down
+#define PWRON_ARM_GRACE_MS 300000UL // Host may still be finishing its halt this long after AC returns
+#define PWRON_AC_STABLE_MS 60000UL  // AC back this long before pressing ("ondelay")
+#define PWRON_RETRY_MS     60000UL  // Between press attempts
+#define PWRON_MAX_TRIES    3        // Per outage cycle; reset on arm and on clear
+
 // LED alert thresholds (battery capacity %), with hysteresis against SOC jitter
 #define LED_CRITICAL_SOC        40   // Enter critical alert below this when on battery
 #define LED_CRITICAL_SOC_CLEAR  43   // Leave critical alert at or above this

@@ -32,6 +32,19 @@ bool bRetrySend = false;   // Last burst delivered nothing; retry next loop
 // via F(): RAM is nearly full, so these strings must not land in .data.
 const __FlashStringHelper* ledPattern;
 
+// Host power-on state (see updateHostPowerOn). All millis() comparisons use
+// unsigned subtraction; a host off for >49.7 days can delay a press by up to
+// one PWRON_LED_OFF_MS window when lastLedOnMs re-wraps — cosmetic, unhandled.
+uint16_t hostLedAdc = 0;          // Last raw PWR_LED sense reading, for calibration
+bool bHostLedOn = false;          // Debounced host power LED state
+unsigned long lastLedOnMs = 0;    // millis() of the last debounced "LED on" reading
+bool bPwrOnArmed = false;         // Host observed down during/just after an AC outage
+bool bAcBack = false;             // AC present again after an outage seen since boot
+unsigned long acBackSinceMs = 0;  // millis() when AC returned; valid while bAcBack
+uint8_t pwrOnTries = 0;           // Presses this outage cycle
+unsigned long lastPressMs = 0;    // millis() of the last press; valid when pwrOnTries > 0
+const __FlashStringHelper* pwrOnState;   // For serial debugging, like ledPattern
+
 // Rolling average of the measured pack voltage (see VBAT_SMOOTH_SAMPLES)
 uint16_t vbatSamples[VBAT_SMOOTH_SAMPLES];
 uint32_t vbatSum = 0;   // 16 samples of up to 19200 mV exceed uint16_t
@@ -51,6 +64,13 @@ void setup(void)
   pinMode(UPS_GREEN_LED, OUTPUT);
   pinMode(UPS_RED_LED, OUTPUT);
   pinMode(UPS_BLUE_LED, OUTPUT);
+
+  // Power-button line: high-Z with the output register held LOW, so a later
+  // pinMode(OUTPUT) alone presses and pinMode(INPUT) releases, never passing
+  // through a pull-up-enabled state.
+  pinMode(HOST_PWR_BTN_PIN, INPUT);
+  digitalWrite(HOST_PWR_BTN_PIN, LOW);
+  pwrOnState = F("idle");
 
   delay(5000);
   Serial.begin(115200);
@@ -96,6 +116,9 @@ void setup(void)
   // Boot grace: anchor the comms-lost clock now so the host driver's restart
   // after a reflash (~11 s via the udev rule) never shows a spurious blue phase.
   lastReportOkMs = millis();
+  // Same for the power-LED-off clock: a reflash must not start with the host
+  // already looking "long off".
+  lastLedOnMs = millis();
 }
 
 
@@ -152,6 +175,8 @@ void loop()
   // unsigned arithmetic keeps this millis()-wrap safe.
   bCommsLost = (millis() - lastReportOkMs > COMMS_LOST_TIMEOUT_MS);
 
+  updateHostPowerOn();
+
   /************ Serial print reported battery level and operation result ******************/
   Serial.print("iRemaining = "); // Battery remaining capacity percentage
   Serial.println(iRemaining);
@@ -163,7 +188,115 @@ void loop()
   Serial.println((millis() - lastReportOkMs) / 1000);
   Serial.print(F("LEDs = ")); // Active LED pattern chosen by updateLeds()
   Serial.println(ledPattern);
+  Serial.print(F("host LED ADC = ")); // Raw PWR_LED sense value, for threshold calibration
+  Serial.print(hostLedAdc);
+  Serial.print(F(", off for s = ")); // Seconds since the last debounced "LED on"
+  Serial.println((millis() - lastLedOnMs) / 1000);
+  Serial.print(F("pwrOn = ")); // Host power-on state machine, tries used
+  Serial.print(pwrOnState);
+  Serial.print(F(", tries = "));
+  Serial.println(pwrOnTries);
   Serial.println();
+}
+
+// Auto power-on of the host after an outage-induced shutdown. The UPS cannot
+// cut host power, so after NUT halts the host on low battery the machine
+// would stay off forever once AC returns; instead we pulse the front-panel
+// power button. Arms only when the host is observed down (power LED off and
+// USB comms lost) while AC is absent, or within a short grace window after AC
+// returns (an FSD halt may finish just after the outage ends). A manual
+// poweroff on mains therefore never triggers a press; one done on battery
+// during an outage is indistinguishable from an FSD and will be rebooted.
+void updateHostPowerOn(void)
+{
+  unsigned long now = millis();
+
+  // Track AC returning after an outage observed since boot. Presence before
+  // any outage never sets bAcBack, so arming is impossible until an outage
+  // has actually been witnessed.
+  static bool prevAcPresent = true;
+  if (!bACPresent) {
+    bAcBack = false;
+  } else if (!prevAcPresent) {
+    bAcBack = true;
+    acBackSinceMs = now;
+  }
+  prevAcPresent = bACPresent;
+
+  bool ledLongOff = (now - lastLedOnMs > PWRON_LED_OFF_MS);
+
+  // Clear: host up on mains, whether the outage was survived or the press
+  // worked. Ends the outage cycle.
+  if (bHostLedOn && bACPresent) {
+    bPwrOnArmed = false;
+    pwrOnTries = 0;
+    pwrOnState = F("idle");
+    return;
+  }
+
+  // Arm: host seen down during the outage or within the post-outage grace.
+  if (!bPwrOnArmed && ledLongOff && bCommsLost &&
+      (!bACPresent || (bAcBack && now - acBackSinceMs < PWRON_ARM_GRACE_MS))) {
+    // No serial print: arming implies the host is down, nobody is listening.
+    // The state is visible later via pwrOnState in the periodic serial block.
+    bPwrOnArmed = true;
+    pwrOnTries = 0;
+  }
+
+  if (!bPwrOnArmed) return;
+
+  if (!bACPresent || !bAcBack) {
+    pwrOnState = F("armed, waiting for AC");
+    return;
+  }
+  if (now - acBackSinceMs < PWRON_AC_STABLE_MS) {
+    pwrOnState = F("armed, AC stabilizing");
+    return;
+  }
+  if (pwrOnTries >= PWRON_MAX_TRIES) {
+    pwrOnState = F("gave up (max tries)");
+    return;
+  }
+  if (pwrOnTries > 0 && now - lastPressMs < PWRON_RETRY_MS) {
+    pwrOnState = F("pressed, waiting for boot");
+    return;
+  }
+  // Both vetoes must still hold at press time: a healthy USB link or a lit
+  // power LED (e.g. broken sense wire on a running host) blocks the press.
+  if (!ledLongOff || !bCommsLost) {
+    pwrOnState = F("armed, veto");
+    return;
+  }
+
+  // Pressing the host power button. No serial print: the host is down by
+  // definition here; the press shows up as pwrOnTries in the periodic block.
+  pinMode(HOST_PWR_BTN_PIN, OUTPUT);   // Output register is LOW: line pulled down
+  delay(PWR_BTN_PULSE_MS);
+  pinMode(HOST_PWR_BTN_PIN, INPUT);    // Release to high-Z, header pull-up recovers
+  pwrOnTries++;
+  lastPressMs = millis();
+  pwrOnState = F("pressed, waiting for boot");
+}
+
+// Debounced host power LED sense, sampled at the delayWithLeds() 25 ms
+// cadence so a blinking suspend LED (period well under 2 s) always refreshes
+// lastLedOnMs and never looks like power-off. PWR_LED_ON_SAMPLES consecutive
+// on-reads are required so a single noise spike coupled onto the high-Z
+// 100k-pulled-down node cannot reset the off-timer.
+void sampleHostPowerLed(void)
+{
+  static uint8_t consecOn = 0;
+  hostLedAdc = analogRead(HOST_PWR_LED_ADC);
+  if (hostLedAdc > PWR_LED_ON_ADC_MIN) {
+    if (consecOn < PWR_LED_ON_SAMPLES) consecOn++;
+    if (consecOn >= PWR_LED_ON_SAMPLES) {
+      bHostLedOn = true;
+      lastLedOnMs = millis();
+    }
+  } else {
+    consecOn = 0;
+    bHostLedOn = false;
+  }
 }
 
 // Derive all USB-HID reported values from the last chip read: smoothed pack
@@ -297,6 +430,7 @@ void delayWithLeds(unsigned long ms)
   unsigned long start = millis();
   while (millis() - start < ms) {
     updateLeds();
+    sampleHostPowerLed();
     delay(25);
   }
 }
