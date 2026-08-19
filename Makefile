@@ -13,10 +13,10 @@ help:
 	@echo "  monitor  Open serial monitor on $(PORT)"
 
 build:
-	arduino-cli compile --fqbn $(FQBN) --warnings all --library $(LIBRARY) .
+	arduino-cli compile --fqbn $(FQBN) --warnings all --library $(LIBRARY) ups_firmware
 
 flash:
-	arduino-cli upload -p $(PORT) --fqbn $(FQBN) .
+	arduino-cli upload -p $(PORT) --fqbn $(FQBN) ups_firmware
 	@sleep 2
 	$(MAKE) monitor
 
