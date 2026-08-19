@@ -1,0 +1,3 @@
+[submodule "libs/DFRobot_LPUPS"]
+	path = libs/DFRobot_LPUPS
+	url = https://github.com/DFRobot/DFRobot_LPUPS.git

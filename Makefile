@@ -1,6 +1,6 @@
 FQBN    := lattepanda:avr:lpleonardo
 PORT    := /dev/ttyACM0
-LIBRARY := ../DFRobot_LPUPS
+LIBRARY := libs/DFRobot_LPUPS
 
 .PHONY: help build flash monitor
 

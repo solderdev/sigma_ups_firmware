@@ -1,5 +1,10 @@
 # LPUPS Firmware + Linux Shutdown Setup
 
+- Clone with `git clone --recursive` — the
+  [DFRobot_LPUPS](https://github.com/DFRobot/DFRobot_LPUPS) library is a git
+  submodule at `libs/DFRobot_LPUPS` (already cloned? run
+  `git submodule update --init`).
+
 Firmware for the LattePanda Sigma's onboard Arduino Leonardo (ATmega32U4),
 handling the external UPS hat (4 Li-Ion cells). Reads the hat's charger chip
 via I2C and presents the system as a standard **USB HID power device** (UPS
@@ -10,9 +15,8 @@ AC/charging/discharging status.
   afterwards). Requires `arduino-cli` plus two things the Makefile expects:
   the `lattepanda:avr` board core (copy the `avr` folder from LattePanda's
   "Leonardo Configuration Files" download, `Arduino IDE Files/avr-0.0.3/avr`,
-  to `~/Arduino/hardware/lattepanda/avr`) and the
-  [DFRobot_LPUPS](https://github.com/DFRobot/DFRobot_LPUPS) library cloned
-  next to this repo (referenced as `../DFRobot_LPUPS`).
+  to `~/Arduino/hardware/lattepanda/avr`) and the DFRobot_LPUPS submodule
+  (see above).
 - Charge % is linear in pack voltage (12.4 V = 0 %, 16.7 V = 100 %), smoothed
   over a ~32 s rolling average so load-spike sag can't fake a low battery.
 - Max charge voltage is limited to 15.6 V (3.9 V/cell) for battery longevity.
