@@ -1,16 +1,17 @@
 # LPUPS Firmware + Linux Shutdown Setup
 
-- Clone with `git clone --recursive` — the
-  [DFRobot_LPUPS](https://github.com/DFRobot/DFRobot_LPUPS) library is a git
-  submodule at `libs/DFRobot_LPUPS` (already cloned? run
-  `git submodule update --init`).
-
 Firmware for the LattePanda Sigma's onboard Arduino Leonardo (ATmega32U4),
 handling the external UPS hat (4 Li-Ion cells). Reads the hat's charger chip
 via I2C and presents the system as a standard **USB HID power device** (UPS
 class, `3343:803a`), reporting charge percentage, runtime estimate and
 AC/charging/discharging status.
 
+Based on the example sketch shipped with the DFRobot_LPUPS library.
+
+- Clone with `git clone --recursive` — the
+  [DFRobot_LPUPS](https://github.com/DFRobot/DFRobot_LPUPS) library is a git
+  submodule at `libs/DFRobot_LPUPS` (already cloned? run
+  `git submodule update --init`).
 - Build: `make build`; flash: `make flash` (opens the serial monitor
   afterwards). Requires `arduino-cli` plus two things the Makefile expects:
   the `lattepanda:avr` board core (copy the `avr` folder from LattePanda's
@@ -23,6 +24,23 @@ AC/charging/discharging status.
 - The firmware's own low-battery flag only fires below ~8 % (runtime < 600 s),
   and it cannot cut output power — shutdown policy is therefore handled on the
   Linux side with NUT (see below).
+
+## LED signals
+
+The hat's three LEDs are alert-only: all off means everything is fine (AC
+present, battery ok). One pattern shows at a time, highest priority first:
+
+| Pattern | Meaning |
+|---|---|
+| Red + blue alternating fast (swap every 250 ms) | On battery **and** charge critical (< 40 %) |
+| Red slow blink (1 s on / 1 s off) | On battery |
+| Blue fast blink (250 ms on / off) | USB comms with the host lost (no HID report accepted for 15 s) |
+| Green solid | Charging from a low battery (≤ 50 %) |
+| All off | Normal: AC present, battery ok |
+
+The critical and charging thresholds have a few percent of hysteresis
+(clear at 43 % / 53 %) so SOC jitter can't make the pattern flicker. The
+active pattern is also printed in the periodic serial output (`LEDs = ...`).
 
 ## Host setup: shutdown at 20 % via NUT
 
